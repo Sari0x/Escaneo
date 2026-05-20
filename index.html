@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Novogar · Gestión EAN</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- HEADER -->
+  <header class="header">
+    <img class="header-logo"
+         src="https://www.novogar.com.ar/Control2/Site/SiteSelectedLogo"
+         alt="Novogar"
+         onerror="this.outerHTML='<span class=\'header-logo-text\'>NOVOGAR</span>'">
+    <div class="header-center">
+      <span class="header-title">Gestión EAN</span>
+      <span class="header-sub" id="headerSub">Cargando…</span>
+    </div>
+    <div class="bt-pill" id="btPill">
+      <span class="bt-dot"></span>
+      <i class="bi bi-bluetooth"></i>
+      <span class="bt-text">Sin dispositivo</span>
+    </div>
+    <button class="header-btn" id="btnRefresh" onclick="cargarProductos()" title="Actualizar">
+      <i class="bi bi-arrow-clockwise"></i>
+    </button>
+  </header>
+
+  <!-- BUSQUEDA + FILTROS -->
+  <div class="search-wrap">
+    <div class="searchbar">
+      <i class="bi bi-search searchbar-icon"></i>
+      <input id="searchInput" class="searchbar-input"
+             type="search" placeholder="Buscar por nombre o código…"
+             autocomplete="off" autocorrect="off" spellcheck="false">
+      <button id="btnClear" class="searchbar-clear" onclick="clearSearch()">
+        <i class="bi bi-x-circle-fill"></i>
+      </button>
+    </div>
+    <div class="chips-row" id="chipsRow">
+      <button class="chip active" data-filter="todos" onclick="setFilter('todos', this)">
+        <i class="bi bi-grid"></i> Todos
+      </button>
+      <button class="chip" data-filter="con-ean" onclick="setFilter('con-ean', this)">
+        <i class="bi bi-upc-scan"></i> Con EAN
+      </button>
+      <button class="chip" data-filter="sin-ean" onclick="setFilter('sin-ean', this)">
+        <i class="bi bi-exclamation-circle"></i> Sin EAN
+      </button>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="statsbar">
+    <div class="stat">
+      <span class="stat-n" id="stTotal">–</span>
+      <span class="stat-l">Total</span>
+    </div>
+    <div class="stat-sep"></div>
+    <div class="stat">
+      <span class="stat-n green" id="stConEAN">–</span>
+      <span class="stat-l">Con EAN</span>
+    </div>
+    <div class="stat-sep"></div>
+    <div class="stat">
+      <span class="stat-n orange" id="stSinEAN">–</span>
+      <span class="stat-l">Sin EAN</span>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <div class="state-msg" id="stLoading">
+      <div class="spinner"></div>
+      <p>Cargando productos…</p>
+    </div>
+
+    <div class="state-msg" id="stError">
+      <i class="bi bi-wifi-off state-icon"></i>
+      <p>Error al cargar los datos</p>
+      <button class="btn-primary" onclick="cargarProductos()">
+        <i class="bi bi-arrow-clockwise"></i> Reintentar
+      </button>
+    </div>
+
+    <div class="state-msg" id="stEmpty">
+      <i class="bi bi-search state-icon"></i>
+      <p>Sin resultados para esta búsqueda</p>
+    </div>
+
+    <div id="productList"></div>
+
+  </main>
+</div>
+
+<!-- BACKDROP + BOTTOM SHEET -->
+<div class="backdrop" id="backdrop" onclick="closeModal()"></div>
+<div class="sheet" id="sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-body" id="sheetBody"></div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- LIGHTBOX -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <img id="lightboxImg" src="" alt="">
+  <span class="lightbox-close"><i class="bi bi-x-lg"></i></span>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

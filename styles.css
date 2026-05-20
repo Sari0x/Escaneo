@@ -559,6 +559,54 @@ img    { display: block; }
 .btn-del  { background: rgba(255,59,48,.1); color: #ff3b30; }
 .btn-del:hover    { background: rgba(255,59,48,.18); }
 
+/* ── LOCK BANNER ─────────────────────────────────────────────── */
+.lock-banner {
+  margin: 0 14px 14px;
+  background: rgba(255,149,0,.1);
+  border: 1.5px solid rgba(255,149,0,.35);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.lock-banner > i {
+  font-size: 22px;
+  color: #c47800;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.lock-banner-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #c47800;
+  margin-bottom: 3px;
+}
+.lock-banner-sub {
+  font-size: 13px;
+  color: #8e6000;
+  line-height: 1.4;
+}
+
+/* ── LOCK CHECKING (spinner mientras verifica) ───────────────── */
+.lock-checking {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 18px;
+  color: #8e8e93;
+  font-size: 14px;
+}
+.spinner-sm {
+  width: 20px; height: 20px;
+  border: 2px solid #e5e5ea;
+  border-top-color: #0a84ff;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  flex-shrink: 0;
+}
+
 /* ── TOAST ───────────────────────────────────────────────────── */
 .toast {
   position: fixed; bottom: 36px; left: 50%;

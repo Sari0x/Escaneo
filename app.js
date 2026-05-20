@@ -1,7 +1,16 @@
 'use strict';
 
 // ── CONFIG ────────────────────────────────────────────────────────
-const DB = 'https://escaneo-b75a3-default-rtdb.firebaseio.com/productos';
+const DB_ROOT  = 'https://escaneo-b75a3-default-rtdb.firebaseio.com';
+const DB       = DB_ROOT + '/productos';
+const LOCKS    = DB_ROOT + '/locks';
+// ID único por sesión/dispositivo para el sistema de locks
+const CLIENT_ID = (localStorage.getItem('ean_client_id') || (() => {
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+  localStorage.setItem('ean_client_id', id);
+  return id;
+})());
+const LOCK_TTL = 5 * 60 * 1000; // 5 min de TTL por si el usuario cierra sin soltar
 
 // ── STATE ─────────────────────────────────────────────────────────
 const S = {
@@ -20,7 +29,16 @@ document.addEventListener('DOMContentLoaded', () => {
   initSearch();
   initSwipe();
   initBluetooth();
+  initAudio();
   cargarProductos();
+
+  // Liberar lock si el usuario cierra el navegador/tab
+  window.addEventListener('pagehide', () => {
+    if (S.current) releaseLock(S.current);
+  });
+  window.addEventListener('beforeunload', () => {
+    if (S.current) releaseLock(S.current);
+  });
 });
 
 // ── DATA ──────────────────────────────────────────────────────────
@@ -188,28 +206,28 @@ function imgShErr(img) {
 }
 
 // ── MODAL ─────────────────────────────────────────────────────────
-function openModal(sku) {
+async function openModal(sku) {
   const data = S.raw[sku];
   if (!data) return;
-  const p = { sku, ...data };
   S.current = sku;
 
+  const p      = { sku, ...data };
   const nombre = p.nombre || sku;
   const ean    = (typeof p.ean === 'string' && p.ean.length > 0) ? p.ean : '';
 
-  // Galería de imágenes
-  const imgs = [p.imagen1, p.imagen2].filter(Boolean);
+  // Galería
+  const imgs    = [p.imagen1, p.imagen2].filter(Boolean);
   const gallery = imgs.length
     ? imgs.map((u, i) => `
         <img src="${esc(u)}" alt="Imagen ${i + 1}"
-             data-url="${esc(u)}"
-             loading="lazy"
+             data-url="${esc(u)}" loading="lazy"
              onclick="openLightbox(this.dataset.url)"
              onerror="imgShErr(this)">`
       ).join('')
     : `<div class="sh-img-ph"><i class="bi bi-image"></i><span>Sin imágenes</span></div>`;
 
-  g('sheetBody').innerHTML = `
+  // Sección común (header + galería + info)
+  const commonHTML = `
     <div class="sh-header">
       <div style="flex:1;min-width:0">
         <div class="sh-title">${esc(nombre)}</div>
@@ -222,10 +240,8 @@ function openModal(sku) {
 
     <div class="sh-gallery">${gallery}</div>
 
-    <!-- INFO -->
     <div class="ios-group">
       <div class="ios-group-title">Información del producto</div>
-
       <div class="ios-row">
         <div class="ios-icon ic-blue"><i class="bi bi-upc"></i></div>
         <div>
@@ -233,25 +249,16 @@ function openModal(sku) {
           <div class="ios-val mono" style="font-size:13px;letter-spacing:1px">${esc(sku)}</div>
         </div>
       </div>
-
       ${p.categoria ? `
       <div class="ios-row">
         <div class="ios-icon ic-purple"><i class="bi bi-tag-fill"></i></div>
-        <div>
-          <div class="ios-lbl">Categoría</div>
-          <div class="ios-val">${esc(p.categoria)}</div>
-        </div>
+        <div><div class="ios-lbl">Categoría</div><div class="ios-val">${esc(p.categoria)}</div></div>
       </div>` : ''}
-
-      ${p.stock !== undefined && p.stock !== null ? `
+      ${p.stock != null ? `
       <div class="ios-row">
         <div class="ios-icon ic-teal"><i class="bi bi-boxes"></i></div>
-        <div>
-          <div class="ios-lbl">Stock</div>
-          <div class="ios-val">${Number(p.stock).toLocaleString('es-AR')} unidades</div>
-        </div>
+        <div><div class="ios-lbl">Stock</div><div class="ios-val">${Number(p.stock).toLocaleString('es-AR')} unidades</div></div>
       </div>` : ''}
-
       <div class="ios-row">
         <div class="ios-icon ${ean ? 'ic-green' : 'ic-orange'}">
           <i class="bi bi-${ean ? 'check-circle-fill' : 'exclamation-circle-fill'}"></i>
@@ -261,9 +268,40 @@ function openModal(sku) {
           <div class="ios-val ${ean ? 'mono' : 'empty'}">${ean || 'Sin EAN registrado'}</div>
         </div>
       </div>
-    </div>
+    </div>`;
 
-    <!-- SCANNER -->
+  // Mostrar modal de inmediato con spinner mientras se verifica el lock
+  g('sheetBody').innerHTML = commonHTML + `
+    <div class="act-wrap" style="padding-top:4px">
+      <div class="lock-checking">
+        <div class="spinner-sm"></div>
+        <span>Verificando disponibilidad…</span>
+      </div>
+    </div>`;
+
+  g('backdrop').classList.add('open');
+  g('sheet').classList.add('open');
+
+  // Intentar adquirir lock mientras la animación corre (~380ms)
+  const lockOk = await acquireLock(sku);
+
+  if (!lockOk) {
+    // Otro usuario tiene este producto abierto
+    g('sheetBody').innerHTML = commonHTML + `
+      <div class="lock-banner">
+        <i class="bi bi-lock-fill"></i>
+        <div>
+          <div class="lock-banner-title">Producto en edición</div>
+          <div class="lock-banner-sub">Otro usuario está modificando este producto ahora mismo.</div>
+        </div>
+      </div>`;
+    feedbackErr();
+    showToast('Producto en edición por otra persona', 'error');
+    return;
+  }
+
+  // Lock adquirido → mostrar sección de scanner y botones
+  g('sheetBody').innerHTML = commonHTML + `
     <div class="scan-wrap">
       <div class="scan-card">
         <div class="scan-lbl"><i class="bi bi-upc-scan"></i> Escanear / Ingresar EAN13</div>
@@ -282,8 +320,6 @@ function openModal(sku) {
         </div>
       </div>
     </div>
-
-    <!-- ACCIONES -->
     <div class="act-wrap">
       <button class="act-btn btn-save" id="btnSave" onclick="saveEAN()" ${ean.length === 13 ? '' : 'disabled'}>
         <i class="bi bi-cloud-arrow-up-fill"></i> Guardar EAN
@@ -292,22 +328,18 @@ function openModal(sku) {
       <button class="act-btn btn-del" onclick="confirmDeleteEAN()">
         <i class="bi bi-trash3-fill"></i> Eliminar EAN
       </button>` : ''}
-    </div>
-  `;
+    </div>`;
 
   initEANField();
-
-  g('backdrop').classList.add('open');
-  g('sheet').classList.add('open');
-
-  // Focus el input para el scanner Bluetooth
-  setTimeout(() => g('eanInput')?.focus(), 420);
+  setTimeout(() => g('eanInput')?.focus(), 120);
 }
 
-function closeModal() {
+async function closeModal() {
+  const sku = S.current;
   g('backdrop').classList.remove('open');
   g('sheet').classList.remove('open');
   S.current = null;
+  if (sku) await releaseLock(sku);
 }
 
 // ── EAN INPUT ─────────────────────────────────────────────────────
@@ -378,10 +410,12 @@ async function saveEAN() {
 
     S.raw[sku].ean = ean;
     compute();
+    feedbackOk();
     showToast(`EAN ${ean} guardado correctamente`, 'success');
     setTimeout(closeModal, 900);
   } catch (e) {
     console.error('Error guardando EAN:', e);
+    feedbackErr();
     showToast('Error al guardar. Verificá la conexión.', 'error');
     btn.disabled = false;
     btn.innerHTML = '<i class="bi bi-cloud-arrow-up-fill"></i> Guardar EAN';
@@ -410,10 +444,12 @@ async function deleteEAN() {
 
     S.raw[sku].ean = '';
     compute();
+    feedbackOk();
     showToast('EAN eliminado correctamente', 'success');
     setTimeout(closeModal, 700);
   } catch (e) {
     console.error('Error eliminando EAN:', e);
+    feedbackErr();
     showToast('Error al eliminar', 'error');
   }
 }
@@ -478,6 +514,109 @@ function openLightbox(url) {
 }
 function closeLightbox() {
   g('lightbox').classList.remove('show');
+}
+
+// ── LOCK (concurrencia) ───────────────────────────────────────────
+// Usa ETag de Firebase para escritura condicional atómica.
+// Si dos usuarios intentan lockear al mismo tiempo, solo uno gana (412).
+async function acquireLock(sku) {
+  const url = `${LOCKS}/${encodeURIComponent(sku)}.json`;
+  try {
+    const getRes = await fetch(url);
+    const etag   = getRes.headers.get('ETag');
+    const lock   = await getRes.json();
+    const now    = Date.now();
+
+    // ¿Otro usuario tiene un lock vigente?
+    if (lock && lock.exp > now && lock.cid !== CLIENT_ID) {
+      return false;
+    }
+
+    // Escritura condicional: solo procede si el nodo no cambió desde el GET
+    const putRes = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'if-match': etag },
+      body: JSON.stringify({ cid: CLIENT_ID, ts: now, exp: now + LOCK_TTL }),
+    });
+
+    // 412 = race condition, alguien más lo tomó en el mismo instante
+    return putRes.ok;
+  } catch {
+    return true; // fallo de red → fail open (no bloquear al usuario)
+  }
+}
+
+async function releaseLock(sku) {
+  if (!sku) return;
+  const url = `${LOCKS}/${encodeURIComponent(sku)}.json`;
+  try {
+    const getRes = await fetch(url);
+    const lock   = await getRes.json();
+    if (lock && lock.cid === CLIENT_ID) {
+      await fetch(url, { method: 'DELETE' });
+    }
+  } catch { /* ignorar errores al soltar */ }
+}
+
+// ── AUDIO ─────────────────────────────────────────────────────────
+let _audioCtx = null;
+
+function initAudio() {
+  // Pre-crear AudioContext en el primer toque del usuario
+  const resume = () => {
+    if (!_audioCtx) {
+      _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } else if (_audioCtx.state === 'suspended') {
+      _audioCtx.resume();
+    }
+  };
+  document.addEventListener('touchstart', resume, { passive: true });
+  document.addEventListener('mousedown',  resume, { passive: true });
+}
+
+function playBeep(type) {
+  try {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (_audioCtx.state === 'suspended') _audioCtx.resume();
+    const ctx = _audioCtx;
+    const now = ctx.currentTime;
+
+    if (type === 'ok') {
+      // Beep corto y agudo estilo pistola de código de barras
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1800, now);
+      osc.frequency.exponentialRampToValueAtTime(1400, now + 0.07);
+      gain.gain.setValueAtTime(0.35, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(now); osc.stop(now + 0.1);
+    } else {
+      // Doble beep descendente de error
+      [0, 0.18].forEach(delay => {
+        const osc  = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(520, now + delay);
+        osc.frequency.exponentialRampToValueAtTime(320, now + delay + 0.12);
+        gain.gain.setValueAtTime(0.18, now + delay);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.13);
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.start(now + delay); osc.stop(now + delay + 0.14);
+      });
+    }
+  } catch { /* AudioContext no disponible */ }
+}
+
+function feedbackOk() {
+  playBeep('ok');
+  navigator.vibrate?.(40);
+}
+
+function feedbackErr() {
+  playBeep('err');
+  navigator.vibrate?.([60, 40, 80]);
 }
 
 // ── BLUETOOTH / SCANNER DETECTION ────────────────────────────────

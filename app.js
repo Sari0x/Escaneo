@@ -10,7 +10,8 @@ const CLIENT_ID = (localStorage.getItem('ean_client_id') || (() => {
   localStorage.setItem('ean_client_id', id);
   return id;
 })());
-const LOCK_TTL = 5 * 60 * 1000; // 5 min de TTL por si el usuario cierra sin soltar
+const LOCK_TTL = 60 * 1000; // 1 min de TTL
+let lockInterval = null;
 
 // ── STATE ─────────────────────────────────────────────────────────
 const S = {
@@ -28,7 +29,6 @@ const g = id => document.getElementById(id);
 document.addEventListener('DOMContentLoaded', () => {
   initSearch();
   initSwipe();
-  initBluetooth();
   initAudio();
   cargarProductos();
 
@@ -68,9 +68,9 @@ async function cargarProductos() {
 }
 
 function buildCatChips() {
-  const row = g('chipsRow');
-  // Eliminar chips de categorías anteriores
-  row.querySelectorAll('[data-cat]').forEach(el => el.remove());
+  const select = g('catSelect');
+  if (!select) return;
+  select.innerHTML = '<option value="todos" disabled selected hidden>Categorías</option>';
 
   const cats = [...new Set(
     Object.values(S.raw)
@@ -79,13 +79,10 @@ function buildCatChips() {
   )].sort((a, b) => a.localeCompare(b, 'es'));
 
   cats.forEach(cat => {
-    const btn = document.createElement('button');
-    btn.className = 'chip';
-    btn.dataset.filter = cat;
-    btn.dataset.cat = '1';
-    btn.innerHTML = `<i class="bi bi-tag-fill"></i> ${esc(cat)}`;
-    btn.onclick = () => setFilter(cat, btn);
-    row.appendChild(btn);
+    const opt = document.createElement('option');
+    opt.value = cat;
+    opt.textContent = cat;
+    select.appendChild(opt);
   });
 }
 
@@ -109,6 +106,10 @@ function compute() {
     list = list.filter(p => hasEAN(p));
   } else if (S.filter === 'sin-ean') {
     list = list.filter(p => !hasEAN(p));
+  } else if (S.filter === 'con-stock') {
+    list = list.filter(p => Number(p.stock) >= 1);
+  } else if (S.filter === 'sin-stock') {
+    list = list.filter(p => !p.stock || Number(p.stock) <= 0);
   } else if (S.filter !== 'todos') {
     list = list.filter(p => p.categoria === S.filter);
   }
@@ -126,12 +127,13 @@ function compute() {
 }
 
 function hasEAN(p) {
-  return typeof p.ean === 'string' && p.ean.length === 13;
+  if (Array.isArray(p.eans) && p.eans.length > 0) return true;
+  return typeof p.ean === 'string' && p.ean.length > 0;
 }
 
 // ── RENDER STATS ──────────────────────────────────────────────────
 function renderStats() {
-  const all = Object.values(S.raw);
+  const all = S.list;
   const conEAN = all.filter(p => hasEAN(p)).length;
   g('stTotal').textContent  = all.length;
   g('stConEAN').textContent = conEAN;
@@ -301,37 +303,36 @@ async function openModal(sku) {
   }
 
   // Lock adquirido → mostrar sección de scanner y botones
+  if (Array.isArray(p.eans) && p.eans.length > 0) {
+    S.currentEans = p.eans.map(x => ({ ean: String(x.ean || ''), detalle: String(x.detalle || '') }));
+  } else if (typeof p.ean === 'string' && p.ean.length > 0) {
+    S.currentEans = [{ ean: p.ean, detalle: '' }];
+  } else {
+    S.currentEans = [{ ean: '', detalle: '' }];
+  }
+  const hasSavedEans = Array.isArray(p.eans) && p.eans.length > 0 || (typeof p.ean === 'string' && p.ean.length > 0);
+
   g('sheetBody').innerHTML = commonHTML + `
     <div class="scan-wrap">
       <div class="scan-card">
-        <div class="scan-lbl"><i class="bi bi-upc-scan"></i> Escanear / Ingresar EAN13</div>
-        <div class="ean-field" id="eanField">
-          <span class="ean-field-icon"><i class="bi bi-upc-scan"></i></span>
-          <input id="eanInput" class="ean-input"
-                 type="tel" inputmode="numeric" pattern="[0-9]*"
-                 placeholder="Apuntá el scanner y escaneá…"
-                 maxlength="13" autocomplete="off"
-                 value="${esc(ean)}">
-          <span class="ean-count" id="eanCount">${ean.length}/13</span>
-        </div>
-        <div class="ean-hint">
-          <i class="bi bi-bluetooth"></i>
-          Conectá el scanner Bluetooth y escaneá el código de barras
-        </div>
+        <div class="scan-lbl"><i class="bi bi-upc-scan"></i> Códigos EAN asociados</div>
+        <div id="eanListContainer"></div>
+        <button class="btn-add-ean" id="btnAddEan" onclick="addEANRow()">
+          <i class="bi bi-plus-lg"></i> Agregar otro EAN
+        </button>
       </div>
     </div>
     <div class="act-wrap">
-      <button class="act-btn btn-save" id="btnSave" onclick="saveEAN()" ${ean.length === 13 ? '' : 'disabled'}>
-        <i class="bi bi-cloud-arrow-up-fill"></i> Guardar EAN
+      <button class="act-btn btn-save" id="btnSave" onclick="saveEAN()">
+        <i class="bi bi-cloud-arrow-up-fill"></i> Guardar
       </button>
-      ${ean ? `
+      ${hasSavedEans ? `
       <button class="act-btn btn-del" onclick="confirmDeleteEAN()">
-        <i class="bi bi-trash3-fill"></i> Eliminar EAN
+        <i class="bi bi-trash3-fill"></i> Eliminar todo
       </button>` : ''}
     </div>`;
 
-  initEANField();
-  setTimeout(() => g('eanInput')?.focus(), 120);
+  renderEANList(0); // Focus primer elemento siempre
 }
 
 async function closeModal() {
@@ -342,54 +343,117 @@ async function closeModal() {
   if (sku) await releaseLock(sku);
 }
 
-// ── EAN INPUT ─────────────────────────────────────────────────────
-function initEANField() {
-  const inp     = g('eanInput');
-  const field   = g('eanField');
-  const count   = g('eanCount');
-  const btnSave = g('btnSave');
-  if (!inp) return;
+// ── EAN INPUT (MULTIPLE) ──────────────────────────────────────────
+function renderEANList(focusIdx = -1) {
+  const container = g('eanListContainer');
+  if (!container) return;
+  
+  container.innerHTML = S.currentEans.map((e, i) => `
+    <div class="ean-row">
+      <div class="ean-field ${e.ean.length > 0 ? 'valid' : ''}">
+        <span class="ean-field-icon"><i class="bi bi-upc-scan"></i></span>
+        <input class="ean-input" data-idx="${i}" type="tel" inputmode="numeric" pattern="[0-9]*" 
+               placeholder="Escaneá o ingresá EAN…" maxlength="15" autocomplete="off" value="${esc(e.ean)}">
+        <span class="ean-count ${e.ean.length > 0 ? 'valid' : ''}">${e.ean.length}/15</span>
+      </div>
+      ${i === 0 ? '' : `
+      <div class="ean-detail-wrap">
+        <input class="ean-detail-input" data-idx="${i}" type="text" placeholder="Detalle (ej. Unidad, Caja x6)…" maxlength="40" value="${esc(e.detalle)}">
+        <button class="btn-del-row" onclick="removeEANRow(${i})"><i class="bi bi-trash-fill"></i></button>
+      </div>`}
+    </div>
+  `).join('');
 
-  inp.addEventListener('input', () => {
-    // Solo dígitos, máximo 13
-    inp.value = inp.value.replace(/\D/g, '').slice(0, 13);
-    const n = inp.value.length;
-    count.textContent = `${n}/13`;
+  g('btnAddEan').style.display = S.currentEans.length < 10 ? 'flex' : 'none';
 
-    field.classList.remove('valid', 'error');
-    count.classList.remove('valid', 'error');
+  const inputs = container.querySelectorAll('.ean-input');
+  const details = container.querySelectorAll('.ean-detail-input');
 
-    if (n === 13) {
-      field.classList.add('valid');
-      count.classList.add('valid');
-      btnSave.disabled = false;
-    } else if (n > 0) {
-      field.classList.add('error');
-      count.classList.add('error');
-      btnSave.disabled = true;
-    } else {
-      btnSave.disabled = true;
-    }
+  inputs.forEach(inp => {
+    inp.addEventListener('input', () => {
+      let val = inp.value.replace(/\D/g, '').slice(0, 15);
+      inp.value = val;
+      const idx = parseInt(inp.dataset.idx, 10);
+      S.currentEans[idx].ean = val;
+      
+      const row = inp.closest('.ean-field');
+      const count = row.querySelector('.ean-count');
+      count.textContent = `${val.length}/15`;
+      
+      if (val.length > 0) {
+        row.classList.add('valid');
+        count.classList.add('valid');
+      } else {
+        row.classList.remove('valid');
+        count.classList.remove('valid');
+      }
+      checkSaveBtn();
+    });
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const idx = parseInt(inp.dataset.idx, 10);
+        if (idx === 0) {
+          if (!g('btnSave').disabled) saveEAN();
+        } else {
+          const detailInp = container.querySelector(`.ean-detail-input[data-idx="${idx}"]`);
+          if (detailInp) detailInp.focus();
+        }
+      }
+    });
   });
 
-  // Enter → guardar (el scanner envía Enter después del código)
-  inp.addEventListener('keydown', e => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      if (!btnSave.disabled) saveEAN();
-    }
+  details.forEach(inp => {
+    inp.addEventListener('input', () => {
+      const idx = parseInt(inp.dataset.idx, 10);
+      S.currentEans[idx].detalle = inp.value;
+    });
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (!g('btnSave').disabled) saveEAN();
+      }
+    });
   });
 
-  // Validar valor pre-cargado
-  if (inp.value) inp.dispatchEvent(new Event('input'));
+  checkSaveBtn();
+
+  if (focusIdx >= 0) {
+    const inp = container.querySelector(`.ean-input[data-idx="${focusIdx}"]`);
+    if (inp) setTimeout(() => inp.focus(), 150);
+  }
 }
+
+function checkSaveBtn() {
+  const btn = g('btnSave');
+  if (!btn) return;
+  const allValid = S.currentEans.every(e => e.ean.length > 0);
+  btn.disabled = S.currentEans.length === 0 || !allValid;
+}
+
+window.addEANRow = function() {
+  if (S.currentEans.length < 10) {
+    S.currentEans.push({ ean: '', detalle: '' });
+    renderEANList(S.currentEans.length - 1);
+  }
+};
+
+window.removeEANRow = function(idx) {
+  if (S.currentEans.length > 1) {
+    S.currentEans.splice(idx, 1);
+    renderEANList();
+  }
+};
 
 // ── FIREBASE OPS ──────────────────────────────────────────────────
 async function saveEAN() {
-  const ean = g('eanInput')?.value?.trim() || '';
+  const eansToSave = S.currentEans.map(e => ({
+    ean: e.ean.trim(),
+    detalle: e.detalle.trim()
+  })).filter(e => e.ean.length > 0);
 
-  if (!/^\d{13}$/.test(ean)) {
-    showToast('EAN inválido: se necesitan exactamente 13 dígitos', 'error');
+  if (eansToSave.length === 0) {
+    showToast('Debés ingresar al menos 1 dígito en los campos EAN', 'error');
     return;
   }
 
@@ -401,24 +465,26 @@ async function saveEAN() {
   btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Guardando…';
 
   try {
+    const primaryEan = eansToSave[0].ean;
     const r = await fetch(`${DB}/${encodeURIComponent(sku)}.json`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ean }),
+      body: JSON.stringify({ ean: primaryEan, eans: eansToSave }),
     });
     if (!r.ok) throw new Error(r.status);
 
-    S.raw[sku].ean = ean;
+    S.raw[sku].ean = primaryEan;
+    S.raw[sku].eans = eansToSave;
     compute();
     feedbackOk();
-    showToast(`EAN ${ean} guardado correctamente`, 'success');
+    showToast('Guardado correctamente', 'success');
     setTimeout(closeModal, 900);
   } catch (e) {
     console.error('Error guardando EAN:', e);
     feedbackErr();
     showToast('Error al guardar. Verificá la conexión.', 'error');
     btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-cloud-arrow-up-fill"></i> Guardar EAN';
+    btn.innerHTML = '<i class="bi bi-cloud-arrow-up-fill"></i> Guardar';
   }
 }
 
@@ -426,8 +492,21 @@ function confirmDeleteEAN() {
   const sku = S.current;
   if (!sku) return;
   const nombre = S.raw[sku]?.nombre || sku;
-  if (!confirm(`¿Eliminar el EAN del producto "${nombre}"?`)) return;
-  deleteEAN();
+  
+  Swal.fire({
+    title: '¿Eliminar todo?',
+    text: `¿Eliminar todos los EANs del producto "${nombre}"?`,
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#d33',
+    cancelButtonColor: '#0a84ff',
+    confirmButtonText: 'Sí, eliminar',
+    cancelButtonText: 'Cancelar'
+  }).then((result) => {
+    if (result.isConfirmed) {
+      deleteEAN();
+    }
+  });
 }
 
 async function deleteEAN() {
@@ -438,14 +517,15 @@ async function deleteEAN() {
     const r = await fetch(`${DB}/${encodeURIComponent(sku)}.json`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ean: null }),
+      body: JSON.stringify({ ean: null, eans: null }),
     });
     if (!r.ok) throw new Error(r.status);
 
-    S.raw[sku].ean = '';
+    delete S.raw[sku].ean;
+    delete S.raw[sku].eans;
     compute();
     feedbackOk();
-    showToast('EAN eliminado correctamente', 'success');
+    showToast('EANs eliminados correctamente', 'success');
     setTimeout(closeModal, 700);
   } catch (e) {
     console.error('Error eliminando EAN:', e);
@@ -480,7 +560,24 @@ function clearSearch() {
 function setFilter(filter, btn) {
   S.filter = filter;
   document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
-  btn?.classList.add('active');
+  const selectWrap = g('catSelectWrap');
+  const catLabel = g('catLabel');
+  const select = g('catSelect');
+
+  if (selectWrap) selectWrap.classList.remove('active');
+
+  if (btn) {
+    btn.classList.add('active');
+    if (select) select.value = 'todos';
+    if (catLabel) catLabel.textContent = 'Categorías';
+  } else if (filter !== 'todos' && filter !== 'con-ean' && filter !== 'sin-ean' && filter !== 'con-stock' && filter !== 'sin-stock') {
+    if (selectWrap) selectWrap.classList.add('active');
+    if (catLabel && select) {
+      const opt = select.options[select.selectedIndex];
+      catLabel.textContent = opt ? opt.text : filter;
+    }
+  }
+
   compute();
 }
 
@@ -522,7 +619,7 @@ function closeLightbox() {
 async function acquireLock(sku) {
   const url = `${LOCKS}/${encodeURIComponent(sku)}.json`;
   try {
-    const getRes = await fetch(url);
+    const getRes = await fetch(url, { headers: { 'X-Firebase-ETag': 'true' } });
     const etag   = getRes.headers.get('ETag');
     const lock   = await getRes.json();
     const now    = Date.now();
@@ -533,11 +630,19 @@ async function acquireLock(sku) {
     }
 
     // Escritura condicional: solo procede si el nodo no cambió desde el GET
+    const headers = { 'Content-Type': 'application/json' };
+    if (etag) headers['if-match'] = etag;
+
     const putRes = await fetch(url, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'if-match': etag },
+      headers,
       body: JSON.stringify({ cid: CLIENT_ID, ts: now, exp: now + LOCK_TTL }),
     });
+
+    if (putRes.ok) {
+      clearInterval(lockInterval);
+      lockInterval = setInterval(() => refreshLock(sku), LOCK_TTL / 2);
+    }
 
     // 412 = race condition, alguien más lo tomó en el mismo instante
     return putRes.ok;
@@ -546,14 +651,43 @@ async function acquireLock(sku) {
   }
 }
 
-async function releaseLock(sku) {
-  if (!sku) return;
+async function refreshLock(sku) {
+  if (S.current !== sku) {
+    clearInterval(lockInterval);
+    return;
+  }
   const url = `${LOCKS}/${encodeURIComponent(sku)}.json`;
   try {
-    const getRes = await fetch(url);
+    const getRes = await fetch(url, { headers: { 'X-Firebase-ETag': 'true' } });
+    const etag   = getRes.headers.get('ETag');
+    const lock   = await getRes.json();
+    const now    = Date.now();
+
+    if (lock && lock.cid === CLIENT_ID) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (etag) headers['if-match'] = etag;
+
+      await fetch(url, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ cid: CLIENT_ID, ts: lock.ts, exp: now + LOCK_TTL }),
+      });
+    } else {
+      clearInterval(lockInterval);
+    }
+  } catch { /* ignorar errores en background */ }
+}
+
+async function releaseLock(sku) {
+  if (!sku) return;
+  clearInterval(lockInterval);
+  const url = `${LOCKS}/${encodeURIComponent(sku)}.json`;
+  try {
+    // Usamos keepalive para que sobreviva si se cierra la pestaña
+    const getRes = await fetch(url, { cache: 'no-store' });
     const lock   = await getRes.json();
     if (lock && lock.cid === CLIENT_ID) {
-      await fetch(url, { method: 'DELETE' });
+      await fetch(url, { method: 'DELETE', keepalive: true });
     }
   } catch { /* ignorar errores al soltar */ }
 }
@@ -617,53 +751,6 @@ function feedbackOk() {
 function feedbackErr() {
   playBeep('err');
   navigator.vibrate?.([60, 40, 80]);
-}
-
-// ── BLUETOOTH / SCANNER DETECTION ────────────────────────────────
-// Los scanners Bluetooth (HID) envían cada dígito en <60ms.
-// Un humano tipeando rara vez baja de 150ms entre teclas.
-// Si detectamos ≥3 caracteres consecutivos con delta <70ms → scanner activo.
-function initBluetooth() {
-  let lastMs    = 0;
-  let rapidSeq  = 0;
-  let idleTimer = null;
-
-  const RAPID_MS   = 70;    // umbral de "carácter de scanner"
-  const SEQ_NEEDED = 3;     // cuántos chars rápidos seguidos para confirmar
-  const IDLE_MS    = 45000; // sin actividad → desconectado
-
-  function onKey(e) {
-    // Solo caracteres imprimibles, sin modificadores de sistema
-    if (e.key.length !== 1 || e.ctrlKey || e.altKey || e.metaKey) return;
-
-    const now   = Date.now();
-    const delta = now - lastMs;
-    lastMs = now;
-
-    if (delta < RAPID_MS) {
-      rapidSeq++;
-      if (rapidSeq >= SEQ_NEEDED) setBTPill(true);
-    } else {
-      rapidSeq = 0;
-    }
-
-    // Reiniciar temporizador de inactividad cada vez que llega un caracter
-    if (g('btPill').classList.contains('connected')) {
-      clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => setBTPill(false), IDLE_MS);
-    }
-  }
-
-  // Escuchar globalmente: funciona cuando el input está enfocado
-  // y también detecta actividad del scanner con modal abierto
-  document.addEventListener('keydown', onKey);
-}
-
-function setBTPill(connected) {
-  const pill = g('btPill');
-  if (!pill) return;
-  pill.classList.toggle('connected', connected);
-  pill.querySelector('.bt-text').textContent = connected ? 'Conectada' : 'Sin dispositivo';
 }
 
 // ── SWIPE DOWN PARA CERRAR ────────────────────────────────────────

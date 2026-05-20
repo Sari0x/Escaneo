@@ -6,6 +6,7 @@
   <title>Novogar · Gestión EAN</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 </head>
 <body>
 <div class="app">
@@ -20,11 +21,6 @@
       <span class="header-title">Gestión EAN</span>
       <div class="header-meta">
         <span class="header-sub" id="headerSub">Cargando…</span>
-        <div class="bt-pill" id="btPill">
-          <span class="bt-dot"></span>
-          <i class="bi bi-bluetooth"></i>
-          <span class="bt-text">Sin dispositivo</span>
-        </div>
       </div>
     </div>
     <button class="header-btn" id="btnRefresh" onclick="cargarProductos()" title="Actualizar">
@@ -44,6 +40,9 @@
       </button>
     </div>
     <div class="chips-row" id="chipsRow">
+      <button class="chip" data-filter="con-stock" onclick="setFilter('con-stock', this)">
+        <i class="bi bi-box-seam"></i> Con Stock
+      </button>
       <button class="chip active" data-filter="todos" onclick="setFilter('todos', this)">
         <i class="bi bi-grid"></i> Todos
       </button>
@@ -53,6 +52,16 @@
       <button class="chip" data-filter="sin-ean" onclick="setFilter('sin-ean', this)">
         <i class="bi bi-exclamation-circle"></i> Sin EAN
       </button>
+      <button class="chip" data-filter="sin-stock" onclick="setFilter('sin-stock', this)">
+        <i class="bi bi-box"></i> Sin Stock
+      </button>
+      <div class="chip-select-wrap" id="catSelectWrap">
+        <i class="bi bi-folder2-open"></i>
+        <span class="cat-label" id="catLabel">Categorías</span>
+        <select id="catSelect" class="chip-select" onchange="setFilter(this.value, null)">
+          <option value="todos" disabled selected hidden>Categorías</option>
+        </select>
+      </div>
     </div>
   </div>
 
@@ -62,12 +71,10 @@
       <span class="stat-n" id="stTotal">–</span>
       <span class="stat-l">Total</span>
     </div>
-    <div class="stat-sep"></div>
     <div class="stat">
       <span class="stat-n green" id="stConEAN">–</span>
       <span class="stat-l">Con EAN</span>
     </div>
-    <div class="stat-sep"></div>
     <div class="stat">
       <span class="stat-n orange" id="stSinEAN">–</span>
       <span class="stat-l">Sin EAN</span>

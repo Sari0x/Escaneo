@@ -13,17 +13,19 @@
   <!-- HEADER -->
   <header class="header">
     <img class="header-logo"
-         src="https://www.novogar.com.ar/Control2/Site/SiteSelectedLogo"
+         src="https://www.novogar.com.ar/image/0/0_0-logo.jpg"
          alt="Novogar"
          onerror="this.outerHTML='<span class=\'header-logo-text\'>NOVOGAR</span>'">
     <div class="header-center">
       <span class="header-title">Gestión EAN</span>
-      <span class="header-sub" id="headerSub">Cargando…</span>
-    </div>
-    <div class="bt-pill" id="btPill">
-      <span class="bt-dot"></span>
-      <i class="bi bi-bluetooth"></i>
-      <span class="bt-text">Sin dispositivo</span>
+      <div class="header-meta">
+        <span class="header-sub" id="headerSub">Cargando…</span>
+        <div class="bt-pill" id="btPill">
+          <span class="bt-dot"></span>
+          <i class="bi bi-bluetooth"></i>
+          <span class="bt-text">Sin dispositivo</span>
+        </div>
+      </div>
     </div>
     <button class="header-btn" id="btnRefresh" onclick="cargarProductos()" title="Actualizar">
       <i class="bi bi-arrow-clockwise"></i>

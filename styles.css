@@ -48,11 +48,15 @@ img    { display: block; }
   z-index: 10;
 }
 
+/* Logo en JPG con fondo blanco sobre el rojo del header */
 .header-logo {
-  height: 34px;
+  height: 36px;
   width: auto;
+  max-width: 90px;
   object-fit: contain;
-  filter: brightness(0) invert(1);
+  border-radius: 8px;
+  background: #fff;
+  padding: 3px 8px;
   flex-shrink: 0;
 }
 .header-logo-text {
@@ -67,61 +71,70 @@ img    { display: block; }
   flex: 1;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   min-width: 0;
 }
 .header-title {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
   color: #fff;
   line-height: 1;
   letter-spacing: -.2px;
 }
+
+/* Fila subtítulo: cantidad + pill BT en la misma línea */
+.header-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+  min-width: 0;
+}
 .header-sub {
-  font-size: 12px;
-  color: rgba(255,255,255,.6);
-  margin-top: 2px;
+  font-size: 11px;
+  color: rgba(255,255,255,.55);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* ── BLUETOOTH PILL ─────────────────────────────────────────── */
 .bt-pill {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 10px 5px 7px;
+  gap: 4px;
+  padding: 2px 7px 2px 5px;
   border-radius: 20px;
-  border: 1.5px solid rgba(255, 59, 48, .55);
-  background: rgba(255, 59, 48, .18);
+  border: 1px solid rgba(255, 59, 48, .6);
+  background: rgba(255, 59, 48, .2);
   color: rgba(255,255,255,.9);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
   flex-shrink: 0;
   transition: border-color .4s ease, background .4s ease;
-  letter-spacing: .1px;
+  letter-spacing: .2px;
 }
 .bt-dot {
-  width: 7px; height: 7px;
+  width: 6px; height: 6px;
   border-radius: 50%;
   background: #ff3b30;
   flex-shrink: 0;
   transition: background .4s ease;
-  box-shadow: 0 0 0 0 rgba(255,59,48,0);
 }
-.bt-pill i { font-size: 13px; line-height: 1; }
+.bt-pill i { font-size: 11px; line-height: 1; }
 
 /* Estado: Conectada */
 .bt-pill.connected {
-  border-color: rgba(48, 209, 88, .6);
-  background: rgba(48, 209, 88, .18);
+  border-color: rgba(48, 209, 88, .65);
+  background: rgba(48, 209, 88, .2);
 }
 .bt-pill.connected .bt-dot {
   background: #30d158;
-  box-shadow: 0 0 0 3px rgba(48,209,88,.25);
   animation: pulse-green 2s infinite;
 }
 @keyframes pulse-green {
-  0%,100% { box-shadow: 0 0 0 0 rgba(48,209,88,.4); }
-  50%      { box-shadow: 0 0 0 5px rgba(48,209,88,0); }
+  0%,100% { box-shadow: 0 0 0 0 rgba(48,209,88,.5); }
+  50%      { box-shadow: 0 0 0 4px rgba(48,209,88,0); }
 }
 
 .header-btn {
